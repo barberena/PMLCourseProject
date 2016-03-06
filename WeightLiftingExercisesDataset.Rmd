@@ -1,0 +1,245 @@
+---
+title: 'Quantitative Self Movement: Weight Lifting Exercise'
+output: html_document
+---
+
+####Background
+
+The following is taken from the Practical Machine Learning Course Project
+assignment and explains in detail the background information:
+
+> Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now
+> possible to collect a large amount of data about personal activity
+> relatively inexpensively. These type of devices are part of the quantified
+> self movement - a group of enthusiasts who take measurements about 
+> themselves regularly to improve their health, to find patterns in their
+> behavior, or because they are tech geeks. One thing that people regularly
+> do is quantify how much of a particular activity they do, but they rarely
+> quantify how well they do it. In this project, your goal will be to use
+> data from accelerometers on the belt, forearm, arm, and dumbell of 6
+> participants. They were asked to perform barbell lifts correctly and
+> incorrectly in 5 different ways. More information is available from the
+> website here:http://groupware.les.inf.puc-rio.br/har (see the section
+> on the Weight Lifting Exercise Dataset).
+
+#### Exploratory Data Analysis
+
+The training data for this project is downloaded from the following URL:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data used to validate our findings is available at the following URL:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+Before we explore the data we need to prepare our environment by loading
+the required R libraries and download the data from the above locations.
+
+##Load Libraries
+
+Load packages that are needed for the processing of the data, generation of the
+graphical figures and analysis of the data.
+
+```{r loadLibraries, results='hide', message=FALSE, warning=FALSE}
+library(RCurl)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(RColorBrewer)
+library(rattle)
+library(randomForest)
+```
+
+## Load Datasets
+
+Read the Weight Lifting Exercises for both Training and Testing Data sets into memory.
+We can pre-tidy the data by setting empty elements to 'NA' during the loading
+of the data into memory.
+
+```{r loadDatasets, cache=TRUE}
+#define URLs
+trainUrl <-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+#Read Train Data
+trainText <- getURL(trainUrl, ssl.verifypeer=0L, followlocation=1L)
+trainData <- read.csv(text=trainText, na.strings=c("", "NA"))
+
+#Read Test Data
+testText <- getURL(testUrl, ssl.verifypeer=0L, followlocation=1L)
+testData <- read.csv(text=testText, na.strings=c("", "NA"))
+```
+## Reviewing
+
+The str command shows a nice detailed summary about the columns such as sample
+data, data types, and column names.  Unfortunately this project restricts the
+length of the document, so I will only show the first few columns so you can
+get an idea of what the data looks like.
+
+```{r strReview, cache=TRUE}
+str(trainData[1:8,1:20])
+```
+
+Of course summary will provide additional information about the data, but it's
+too long to include in this report, but I list the command:
+
+>summary(trainData)
+
+In reviewing summary, we find several columns with 19,216 NA's.  This is just
+dirty data that will get in the way of training.
+
+## Cleaning
+
+I'm removing columns such as user_name, time stamps that would also impact
+the training models since they don't provide any relevant information for the
+training models.  During the load process, I pre-tidy the data by setting empty
+elements (field values) to 'NA'.  However, the data is littered with columns
+that will not provide relevant data to the training models.  So we can clean
+those off next.  Note that these are the columns with 19216 NA's.
+
+```{r tidyTrainData,echo=TRUE,warning=FALSE,error=FALSE,results='hide', cache=TRUE}
+# remove the columns that aren't needed for the training models
+trainData <- subset(trainData, select= -c(X, user_name, raw_timestamp_part_1,
+                                          raw_timestamp_part_2, cvtd_timestamp,
+                                          new_window, num_window))
+# Too many NA's to be of any use
+trainData <- trainData[,colSums(is.na(trainData))<19216]
+```
+
+What we do to the Training data, we must also do to the testing data.
+
+```{r tidyTestData,echo=TRUE,warning=FALSE,error=FALSE,results='hide', cache=TRUE}
+# remove the columns that aren't needed for the training models
+testData <- subset(testData, select= -c(X, user_name, raw_timestamp_part_1,
+                                          raw_timestamp_part_2, cvtd_timestamp,
+                                          new_window, num_window))
+# Too many NA's to be of any use
+testData <- testData[,colSums(is.na(testData))<19216]
+```
+
+#### Divide Data Training and Validation sets
+Divide 60% of data to use for training and 40% of data for Validation
+
+```{r Divide, echo=TRUE, cache=TRUE}
+inTrain = createDataPartition(y=trainData$classe, p=0.6, list=FALSE)
+trainer = trainData[ inTrain,]
+validator = trainData[-inTrain,]
+```
+
+#### Random Forest Model
+
+Random Forest (rf), is one of the most used and accurate algorithms along with
+boosting.
+
+```{r RandomForest, echo=TRUE, cache=TRUE}
+set.seed(1024)
+
+rfTrControl <- trainControl( method = "repeatedcv",
+                             number = 10,
+                             repeats = 3,
+                             preProcOptions = list(thresh = 0.9))
+
+rfTuneGrid = expand.grid(mtry = c(2,4,8,15))
+
+rfFit <- train(classe ~ ., data = trainer,
+                method = "rf",
+                preProcess="pca",
+                trControl = rfTrControl,
+                tuneGrid = rfTuneGrid)
+
+rfFit
+```
+
+```{r RandomForestPlot, echo=TRUE, cache=TRUE}
+
+trellis.par.set(caretTheme())
+plot(rfFit, log="y", metric = "Kappa")
+
+```
+
+
+#### Bagging Model
+
+Using Bagging Model as a comparison.
+
+```{r Bagging, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, cache=TRUE}
+
+set.seed(1024)
+
+bagTrControl <- trainControl(method = "repeatedcv",
+                             number = 10,
+                             repeats = 3,
+                             preProcOptions = list(thresh = 0.9))
+
+bagFit <- train(classe ~ .,
+                data = trainer,
+                method = "bagFDA",
+                B=10,
+                preProcess="pca",
+                trControl = bagTrControl)
+
+bagFit
+
+```
+
+```{r BaggingPlot, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, cache=TRUE}
+
+trellis.par.set(caretTheme())
+plot(bagFit, log="y", metric = "Kappa")
+
+```
+
+#### Validate Training
+
+Comparing the training shows that Random Forests is much more accurate.
+
+```{r Resamples, echo=TRUE, cache=TRUE}
+
+results <- resamples(list(RF=rfFit, Bag=bagFit))
+summary(results)
+bwplot(results)
+
+```
+
+Note that we are using some of the training data for data validation instead of
+using the test data.  Since Random Forests is accurate, we'll run the validation
+against it to find the out of sample error.
+
+```{r Validate, echo=TRUE, cache=TRUE}
+
+# calculate outcome for validation data
+validatePrediction <- predict(rfFit,validator)
+
+# compare results
+confusionMatrix(validator$classe, validatePrediction)
+
+```
+
+Again, this shows that accuracy is very high with the Random Forest model.
+
+Since we built the models, and they took such a long time to run, I'm saving
+them to files for use during the quiz portion of the project, including the
+tidy test data.
+
+```{r SaveModel, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, cache=TRUE}
+# if they exist, then let's not override them
+
+if (!file.exists("rfFit.RData"))
+    save(rfFit, file = "rfFit.RData")
+
+if (!file.exists("bagFit.RData"))
+    save(bagFit, file = "bagFit.RData")
+
+if (!file.exists("testing.RData"))
+    save(testData, file = "testData.RData")
+
+# to load the data use 'load(sourceFileName)'
+```
+
+#### Reasons for Choices Made
+* Bagging and Random Forrest models were chosen due to their reputation for accurate
+results and because they fit well with the data model.
+* Random Forest produced the best results, so it was chosen for perdition validation.
+* TrainControl was used and parameters set based on on-line research (Google) and
+  recommendations from a colleague at work.  The re-sampling iterations was set to 10
+  as well as the number of sets to compute was set to 3 based on recommendations located
+  at this site for repeated k-fold cross validation: 
+  http://machinelearningmastery.com/how-to-estimate-model-accuracy-in-r-using-the-caret-package/
